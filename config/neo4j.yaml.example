@@ -1,0 +1,39 @@
+# Neo4j Configuration
+# Copy to config/neo4j.yaml and set NEO4J_PASSWORD env var (or replace inline)
+
+connection:
+  uri: bolt://localhost:7687
+  username: neo4j
+  password: ${NEO4J_PASSWORD:-password}   # default: "password" (change in production)
+  database: neo4j
+
+  # Connection pool settings
+  max_connection_pool_size: 50
+  connection_acquisition_timeout: 60
+  connection_timeout: 30
+  max_transaction_retry_time: 30
+
+# Graph schema settings
+schema:
+  constraints:
+    - "CREATE CONSTRAINT doc_id IF NOT EXISTS FOR (d:Document) REQUIRE d.doc_id IS UNIQUE"
+    - "CREATE CONSTRAINT person_name IF NOT EXISTS FOR (p:Person) REQUIRE p.name IS UNIQUE"
+    - "CREATE CONSTRAINT org_name IF NOT EXISTS FOR (o:Organization) REQUIRE o.name IS UNIQUE"
+    - "CREATE CONSTRAINT tech_name IF NOT EXISTS FOR (t:Technology) REQUIRE t.name IS UNIQUE"
+
+  indexes:
+    - "CREATE INDEX doc_type IF NOT EXISTS FOR (d:Document) ON (d.document_type)"
+    - "CREATE INDEX doc_source IF NOT EXISTS FOR (d:Document) ON (d.source_tracker)"
+    - "CREATE INDEX topic_name IF NOT EXISTS FOR (t:Topic) ON (t.name)"
+    - "CREATE INDEX ref_value IF NOT EXISTS FOR (r:Reference) ON (r.value)"
+
+# Import settings
+import:
+  batch_size: 1000
+  max_retries: 3
+  skip_duplicates: true
+
+# Query settings
+queries:
+  timeout: 30
+  max_results: 1000

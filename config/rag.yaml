@@ -1,0 +1,30 @@
+indexing:
+  chunk_size: 800
+  chunk_overlap: 150
+  min_chunk_length: 50
+  text_preference: "longer"    # "native", "ocr", or "longer"
+
+vector:
+  collection_name: "pdf_chunks"
+  embedding_model: "all-MiniLM-L6-v2"
+  persist_directory: "data/rag/chromadb"
+
+bm25:
+  persist_path: "data/rag/bm25_index.json"
+  k1: 1.5
+  b: 0.75
+
+retrieval:
+  top_k: 10
+  final_top_k: 8
+  rrf_k: 60
+  graph_max_hops: 1
+  graph_max_entities: 5
+
+generation:
+  system_prompt: |
+    You are a research assistant for a PDF document knowledge base.
+    Answer based on the provided context. Cite document IDs when possible.
+    If context is insufficient, say so.
+  max_context_tokens: 3000
+  max_history_turns: 10

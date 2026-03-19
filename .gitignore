@@ -1,0 +1,29 @@
+# Virtual environment
+venv/
+
+# Data (PDFs, processed results, indexes)
+data/
+
+# Secrets / credentials
+config/llm.yaml
+config/neo4j.yaml
+
+# Generated outputs
+test_results.json
+training_data.json
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.ipynb_checkpoints
+# Additional Files
+CSE573_G30_PDF-OCR_Proposal.pdf
+CSE573_G30_PDF-OCR_Proposal.md
