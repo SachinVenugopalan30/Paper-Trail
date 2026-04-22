@@ -8,6 +8,7 @@ max_tokens, exponential backoff retry logic, and comprehensive error handling.
 
 import base64
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Optional
@@ -61,7 +62,7 @@ def _encode_image_to_base64(image_path: str) -> str:
 def _make_ocr_request(
     image_b64: str,
     max_tokens: int,
-    model: str = "mlx-community/GLM-OCR-bf16",
+    model: str = "",
     temperature: float = 0.7,
     timeout: int = 300
 ) -> dict:
@@ -83,7 +84,9 @@ def _make_ocr_request(
         GLMOCRServerError: If server returns an error response
         requests.RequestException: For other request errors
     """
-    url = "http://localhost:8080/chat/completions"
+    base = os.environ.get("OCR_API_BASE", "http://localhost:8080/v1")
+    url = os.environ.get("GLM_OCR_URL", f"{base}/chat/completions")
+    model = model or os.environ.get("GLM_OCR_MODEL", "zai-org/GLM-OCR")
 
     payload = {
         "model": model,

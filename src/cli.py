@@ -153,7 +153,8 @@ def extract_batch_command(args):
         parallel_workers=args.parallel,
         save_images=args.save_images,
         ocr_dpi=args.ocr_dpi,
-        ocr_timeout=args.ocr_timeout
+        ocr_timeout=args.ocr_timeout,
+        method=getattr(args, 'method', 'hybrid')
     )
     
     # Process batch
@@ -531,6 +532,42 @@ def kg_stats_command(args):
         kg_client.close()
 
 
+def kg_integrity_command(args):
+    """Run knowledge graph integrity checks."""
+    from src.kg import get_client as get_kg_client
+    from src.evaluation.kg_integrity import run_integrity_check
+    import json
+
+    print("Knowledge Graph Integrity Check")
+    print("=" * 80)
+
+    kg_client = get_kg_client()
+    if not kg_client.connect():
+        print("Error: Failed to connect to Neo4j")
+        sys.exit(1)
+
+    try:
+        report = run_integrity_check(kg_client)
+        report.print_report()
+
+        if args.output:
+            with open(args.output, 'w') as f:
+                json.dump(report.to_dict(), f, indent=2)
+            print(f"\nReport saved to: {args.output}")
+    finally:
+        kg_client.close()
+
+
+def kg_canonicalize_command(args):
+    """Merge duplicate entity nodes using fuzzy name matching."""
+    from scripts.canonicalize_entities import run_canonicalization
+    run_canonicalization(
+        threshold=args.threshold,
+        dry_run=args.dry_run,
+        label=args.label,
+    )
+
+
 def rag_index_command(args):
     """Build or rebuild the RAG index (ChromaDB + BM25)."""
     from src.rag.indexer import RAGIndexer
@@ -624,6 +661,113 @@ def rag_chat_command(args):
     chatbot_main()
 
 
+def rag_eval_command(args):
+    """Evaluate RAG retrieval quality (Recall@K, MRR, latency)."""
+    from src.rag.vector_store import VectorStore
+    from src.rag.bm25 import BM25Index
+    from src.rag.hybrid import HybridRetriever
+    from src.evaluation.rag_evaluator import load_eval_queries, evaluate_retriever, evaluate_all_tiers
+    import yaml
+    import json
+    from pathlib import Path as _Path
+
+    cfg_path = _Path(__file__).parent.parent / "config" / "rag.yaml"
+    with open(cfg_path) as f:
+        cfg = yaml.safe_load(f) or {}
+
+    vec_cfg = cfg.get("vector", {})
+    bm_cfg = cfg.get("bm25", {})
+
+    vs = VectorStore(
+        collection_name=vec_cfg.get("collection_name", "pdf_chunks"),
+        embedding_model=vec_cfg.get("embedding_model", "all-MiniLM-L6-v2"),
+        persist_directory=vec_cfg.get("persist_directory", "data/rag/chromadb"),
+    )
+    bm25 = BM25Index(k1=bm_cfg.get("k1", 1.5), b=bm_cfg.get("b", 0.75))
+    bm25.load(bm_cfg.get("persist_path", "data/rag/bm25_index.json"))
+
+    graph_ret = None
+    try:
+        from src.kg.client import get_client as get_kg_client
+        from src.rag.graph_retriever import GraphRetriever
+        kg = get_kg_client()
+        kg.connect()
+        ret_cfg = cfg.get("retrieval", {})
+        graph_ret = GraphRetriever(kg_client=kg, max_entities=ret_cfg.get("graph_max_entities", 5))
+    except Exception:
+        pass
+
+    hybrid = HybridRetriever(vector_store=vs, bm25_index=bm25, graph_retriever=graph_ret, config=cfg)
+
+    k_values = [int(k) for k in args.k_values.split(",")]
+    queries = load_eval_queries(args.queries)
+    print(f"Loaded {len(queries)} evaluation queries from {args.queries}")
+
+    if args.tiers:
+        reports = evaluate_all_tiers(vs, bm25, graph_ret, hybrid, queries, k_values)
+        for tier_name, report in reports.items():
+            report.print_report()
+        if args.output:
+            output_data = {name: r.to_dict() for name, r in reports.items()}
+            with open(args.output, "w") as f:
+                json.dump(output_data, f, indent=2)
+            print(f"\nReport saved to: {args.output}")
+    else:
+        report = evaluate_retriever(hybrid, queries, k_values, tier_name="hybrid_graph")
+        report.print_report()
+        if args.output:
+            with open(args.output, "w") as f:
+                json.dump(report.to_dict(), f, indent=2)
+            print(f"\nReport saved to: {args.output}")
+
+
+def eval_entity_tool_command(args):
+    """Launch the Gold Set B entity/relation annotation Streamlit UI."""
+    import subprocess
+    import sys
+    from pathlib import Path as _Path
+    tool_path = _Path(__file__).parent / "evaluation" / "entity_annotation_tool.py"
+    subprocess.run([sys.executable, "-m", "streamlit", "run", str(tool_path)], check=True)
+
+
+def eval_entity_report_command(args):
+    """Print aggregate Entity/Relation F1 from Gold Set B annotations."""
+    import json
+    from pathlib import Path as _Path
+    from src.evaluation.entity_annotation_tool import EntityAnnotationStore
+    from src.evaluation.entity_metrics import compute_gold_set_b_report
+
+    store = EntityAnnotationStore()
+    all_anns = store.get_all()
+    if not all_anns:
+        print("No Gold Set B annotations found. Run the entity annotation tool first.")
+        return
+
+    report = compute_gold_set_b_report(all_anns)
+    print("\nGold Set B — Entity/Relation F1 Report")
+    print("=" * 50)
+    print(f"Pages annotated:          {report['total_pages_annotated']}")
+    print(f"\nEntity:")
+    e = report["entity"]
+    print(f"  Precision:              {e['mean_precision']:.4f}")
+    print(f"  Recall:                 {e['mean_recall']:.4f}")
+    print(f"  F1:                     {e['mean_f1']:.4f}")
+    print(f"  Hallucination rate:     {e['mean_hallucination_rate']:.4f}")
+    print(f"\nRelation:")
+    r = report["relation"]
+    print(f"  Precision:              {r['mean_precision']:.4f}")
+    print(f"  Recall:                 {r['mean_recall']:.4f}")
+    print(f"  F1:                     {r['mean_f1']:.4f}")
+    print(f"  Hallucination rate:     {r['mean_hallucination_rate']:.4f}")
+    print(f"\nMean schema validity:     {report['mean_schema_validity_rate']:.4f}")
+    print("=" * 50)
+
+    if args.output:
+        with open(args.output, "w") as f:
+            json.dump(report, f, indent=2)
+        print(f"Report saved to: {args.output}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="PDF/OCR Extraction and Knowledge Graph Pipeline",
@@ -680,6 +824,8 @@ Examples:
     # Extract-batch command
     batch_parser = subparsers.add_parser('extract-batch', help='Process multiple PDFs with both methods')
     batch_parser.add_argument('input_dir', help='Directory containing PDF files')
+    batch_parser.add_argument('--method', choices=['native', 'ocr', 'hybrid'], default='hybrid',
+                             help='Extraction method: native (fast), ocr, or hybrid (default)')
     batch_parser.add_argument('--limit', type=int, default=None,
                              help='Limit to first N PDFs (for testing)')
     batch_parser.add_argument('--limit-pages', type=int, default=None,
@@ -746,6 +892,32 @@ Examples:
     kg_stats_parser = kg_subparsers.add_parser('stats', help='Show Neo4j statistics')
     kg_stats_parser.set_defaults(func=kg_stats_command)
 
+    # kg-integrity command
+    kg_integrity_parser = kg_subparsers.add_parser('integrity', help='Run graph integrity checks')
+    kg_integrity_parser.add_argument('--output', '-o', help='Save report to JSON file')
+    kg_integrity_parser.add_argument('--verbose', '-v', action='store_true', help='Show full details')
+    kg_integrity_parser.set_defaults(func=kg_integrity_command)
+
+    # kg canonicalize
+    kg_canon_parser = kg_subparsers.add_parser(
+        'canonicalize', help='Merge duplicate entity nodes via fuzzy name matching'
+    )
+    kg_canon_parser.add_argument(
+        '--threshold', type=float, default=0.85,
+        help='Levenshtein similarity threshold (default: 0.85)'
+    )
+    kg_canon_parser.add_argument(
+        '--dry-run', action='store_true',
+        help='Show what would merge without writing to Neo4j'
+    )
+    kg_canon_parser.add_argument(
+        '--label',
+        choices=['Person', 'Organization', 'Technology', 'Topic', 'Location'],
+        default=None,
+        help='Restrict to one entity label (default: all)'
+    )
+    kg_canon_parser.set_defaults(func=kg_canonicalize_command)
+
     # RAG commands
     rag_parser = subparsers.add_parser('rag', help='RAG chatbot operations')
     rag_subparsers = rag_parser.add_subparsers(dest='rag_command', help='RAG subcommands')
@@ -771,6 +943,29 @@ Examples:
     rag_chat_parser = rag_subparsers.add_parser('chat', help='Launch Gradio chatbot UI')
     rag_chat_parser.set_defaults(func=rag_chat_command)
 
+    # rag eval
+    rag_eval_parser = rag_subparsers.add_parser('eval', help='Evaluate RAG retrieval (Recall@K, MRR)')
+    rag_eval_parser.add_argument('--queries', default='data/evaluation/rag_eval_queries.json',
+                                 help='Path to evaluation queries JSON (default: data/evaluation/rag_eval_queries.json)')
+    rag_eval_parser.add_argument('--k-values', default='1,3,5,10',
+                                 help='Comma-separated K values for Recall@K (default: 1,3,5,10)')
+    rag_eval_parser.add_argument('--tiers', action='store_true',
+                                 help='Run full E7-E10 ablation across all retrieval tiers')
+    rag_eval_parser.add_argument('--output', '-o', help='Save report to JSON file')
+    rag_eval_parser.set_defaults(func=rag_eval_command)
+
+    # Entity evaluation commands (Gold Set B)
+    eval_gb_parser = subparsers.add_parser('eval', help='Gold Set B entity/relation evaluation')
+    eval_gb_subparsers = eval_gb_parser.add_subparsers(dest='eval_command', help='Eval subcommands')
+
+    eval_tool_parser = eval_gb_subparsers.add_parser('entity-tool', help='Launch entity annotation Streamlit UI')
+    eval_tool_parser.set_defaults(func=eval_entity_tool_command)
+
+    eval_report_parser = eval_gb_subparsers.add_parser('entity-report', help='Compute aggregate Entity/Relation F1')
+    eval_report_parser.add_argument('--annotations', help='Path to annotations JSON (uses default if omitted)')
+    eval_report_parser.add_argument('--output', '-o', help='Save report to JSON file')
+    eval_report_parser.set_defaults(func=eval_entity_report_command)
+
     args = parser.parse_args()
     
     if not args.command:
@@ -786,6 +981,11 @@ Examples:
     elif args.command == 'rag':
         if not args.rag_command:
             rag_parser.print_help()
+            sys.exit(1)
+        args.func(args)
+    elif args.command == 'eval':
+        if not args.eval_command:
+            eval_gb_parser.print_help()
             sys.exit(1)
         args.func(args)
     else:

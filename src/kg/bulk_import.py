@@ -147,6 +147,7 @@ class BulkImporter:
                             **e.properties,
                             "_confidence": e.confidence,
                             "_source_text": e.source_text,
+                            "_extraction_method": e.properties.get("extraction_method", "llm"),
                         }
                     )
                 )
@@ -204,6 +205,7 @@ class BulkImporter:
                             **r.properties,
                             "_confidence": r.confidence,
                             "_source_text": r.source_text,
+                            "_extraction_method": r.properties.get("extraction_method", "llm"),
                         }
                     )
                 )

@@ -1,0 +1,7 @@
+# macOS Apple Silicon only — required for the mlx-vlm GLM-OCR server
+# Install alongside requirements.txt:
+#   pip install -r requirements.txt -r requirements-macos.txt
+mlx==0.31.1
+mlx-lm==0.31.1
+mlx-metal==0.31.1
+mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@b7f853a26a0bdcb60a307b1deb01ba5be9ac9ffc

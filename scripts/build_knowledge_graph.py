@@ -44,8 +44,23 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.llm import get_client, EntityExtractionChain
+from src.llm.config import get_config, ProviderConfig
 from src.kg import get_client as get_kg_client, BulkImporter
 from src.llm.chains import ExtractionResult
+
+
+def _apply_llm_overrides(provider: str, base_url: Optional[str], model: Optional[str]):
+    """Override LLM config with CLI arguments, enabling the provider if needed."""
+    config = get_config()
+    if provider not in config.providers:
+        config.providers[provider] = ProviderConfig(name=provider, enabled=True)
+    pc = config.providers[provider]
+    pc.enabled = True
+    if base_url:
+        pc.base_url = base_url
+    if model:
+        pc.model = model
+    config.default_provider = provider
 
 
 @dataclass
@@ -157,7 +172,7 @@ class KGCheckpoint:
 
 def find_all_result_files() -> List[Path]:
     """Find all result files from processed directories."""
-    pattern = "data/processed/*/*/results/*_results.json"
+    pattern = "data/processed/*/results/*_results.json"
     files = list(Path(project_root).glob(pattern))
     return sorted(files)
 
@@ -166,9 +181,10 @@ def process_single_pdf(
     result_file: Path,
     llm_client,
     kg_client,
-    extraction_chain: EntityExtractionChain,
+    extractor,
     max_pages: int = 15,
-    checkpoint: Optional[KGCheckpoint] = None
+    checkpoint: Optional[KGCheckpoint] = None,
+    extraction_file_tag: str = "llm",
 ) -> Tuple[int, int, str]:
     """
     Process a single PDF result file.
@@ -214,7 +230,7 @@ def process_single_pdf(
 
             try:
                 # Extract entities
-                result = extraction_chain.extract(
+                result = extractor.extract(
                     text=text_to_process,
                     document_id=page_doc_id
                 )
@@ -235,6 +251,28 @@ def process_single_pdf(
                 print(f"    Warning: Error on page {i}: {e}")
                 continue
         
+        # Persist extraction results for Gold Set B annotation
+        if all_results:
+            extractions_dir = project_root / "data" / "evaluation" / "extractions"
+            extractions_dir.mkdir(parents=True, exist_ok=True)
+            extraction_file = extractions_dir / f"{doc_stem}_{extraction_file_tag}_extractions.json"
+            serialized = []
+            for res in all_results:
+                serialized.append({
+                    "source_document": res.source_document,
+                    "entities": [e.model_dump() for e in res.entities],
+                    "relations": [r.model_dump() for r in res.relations],
+                    "processing_metadata": res.processing_metadata,
+                })
+            with open(extraction_file, 'w') as f:
+                json.dump({
+                    "result_file": str(result_file),
+                    "doc_stem": doc_stem,
+                    "source_tracker": source_tracker,
+                    "pages_processed": len(all_results),
+                    "extractions": serialized,
+                }, f, indent=2)
+
         # Import to Neo4j
         if all_results:
             importer = BulkImporter(client=kg_client, batch_size=100)
@@ -274,7 +312,11 @@ def process_all_pdfs(
     max_pages: int = 15,
     parallel_workers: int = 3,
     checkpoint: Optional[KGCheckpoint] = None,
-    resume: bool = False
+    resume: bool = False,
+    method: str = "llm",
+    llm_provider: Optional[str] = None,
+    llm_base_url: Optional[str] = None,
+    llm_model: Optional[str] = None,
 ) -> Dict:
     """
     Process all PDFs with parallel workers.
@@ -296,28 +338,42 @@ def process_all_pdfs(
     
     # Initialize clients (will be shared across workers)
     print("\nInitializing LLM and Neo4j clients...")
-    llm_client = get_client()
+    if llm_provider:
+        _apply_llm_overrides(llm_provider, llm_base_url, llm_model)
+    llm_client = get_client(provider_name=llm_provider)
     kg_client = get_kg_client()
     
     if not kg_client.connect():
         print("ERROR: Failed to connect to Neo4j")
         return {'error': 'Neo4j connection failed'}
     
-    extraction_chain = EntityExtractionChain(
-        llm_client=llm_client,
-        min_confidence=0.6,
-        enable_fallback=True
-    )
-    
+    # Build extractor(s) based on --method
+    extractors = []
+    if method in ("llm", "both"):
+        extractors.append(("llm", EntityExtractionChain(
+            llm_client=llm_client, min_confidence=0.6, enable_fallback=True
+        )))
+    if method in ("classical", "both"):
+        from src.extraction.classical_ie import ClassicalExtractor
+        extractors.append(("classical", ClassicalExtractor()))
+
     print(f"✓ Connected to Neo4j")
-    print(f"Processing {len(files_to_process)} PDFs with {parallel_workers} workers...\n")
-    
+    print(f"Processing {len(files_to_process)} PDFs with {parallel_workers} workers "
+          f"(method={method})...\n")
+
     # Process in parallel
     total_entities = 0
     total_relations = 0
     completed = 0
     failed = 0
-    
+
+    # For "both" we run each file through every extractor in sequence
+    work_items = [
+        (pdf_file, tag, ext)
+        for pdf_file in files_to_process
+        for tag, ext in extractors
+    ]
+
     with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
         # Submit all tasks
         future_to_file = {
@@ -326,10 +382,11 @@ def process_all_pdfs(
                 pdf_file,
                 llm_client,
                 kg_client,
-                extraction_chain,
+                ext,
                 max_pages,
-                checkpoint
-            ): pdf_file for pdf_file in files_to_process
+                checkpoint if tag == extractors[0][0] else None,  # only first extractor updates checkpoint
+                tag,
+            ): pdf_file for pdf_file, tag, ext in work_items
         }
         
         # Process completed tasks with progress bar
@@ -376,49 +433,56 @@ def process_all_pdfs(
     }
 
 
-def test_single_pdf(result_file: str, max_pages: int = 15):
+def test_single_pdf(result_file: str, max_pages: int = 15, method: str = "llm",
+                    llm_provider: Optional[str] = None, llm_base_url: Optional[str] = None,
+                    llm_model: Optional[str] = None):
     """Test extraction on a single PDF."""
     print("="*70)
     print("Knowledge Graph Extraction - Single PDF Test")
     print("="*70)
-    
+
     result_path = Path(result_file)
     if not result_path.exists():
         print(f"ERROR: File not found: {result_file}")
         return
-    
+
     # Load and show info
     with open(result_path) as f:
         data = json.load(f)
-    
+
     print(f"\nPDF: {result_path.name}")
     print(f"Total pages: {data.get('total_pages', 0)}")
     print(f"Will process: {min(max_pages, data.get('total_pages', 0))} pages")
     print("\n" + "="*70)
-    
+
     # Initialize clients
-    llm_client = get_client()
+    if llm_provider:
+        _apply_llm_overrides(llm_provider, llm_base_url, llm_model)
+    llm_client = get_client(provider_name=llm_provider)
     kg_client = get_kg_client()
     
     if not kg_client.connect():
         print("ERROR: Failed to connect to Neo4j")
         return
     
-    extraction_chain = EntityExtractionChain(
-        llm_client=llm_client,
-        min_confidence=0.6,
-        enable_fallback=True
-    )
-    
+    if method == "classical":
+        from src.extraction.classical_ie import ClassicalExtractor
+        extractor = ClassicalExtractor()
+    else:
+        extractor = EntityExtractionChain(
+            llm_client=llm_client, min_confidence=0.6, enable_fallback=True
+        )
+
     print("✓ Connected to Neo4j")
-    
+
     # Process
     entities, relations, status = process_single_pdf(
         result_path,
         llm_client,
         kg_client,
-        extraction_chain,
-        max_pages
+        extractor,
+        max_pages,
+        extraction_file_tag=method,
     )
     
     print(f"\n{'='*70}")
@@ -465,6 +529,8 @@ Examples:
                        help='Test with single PDF file')
     parser.add_argument('--all', action='store_true',
                        help='Process all result files')
+    parser.add_argument('--method', choices=['llm', 'classical', 'both'], default='llm',
+                       help='Extraction method: llm (default), classical (spaCy), or both')
     parser.add_argument('--max-pages', type=int, default=15,
                        help='Maximum pages to process per PDF (default: 15)')
     parser.add_argument('--workers', type=int, default=3,
@@ -478,7 +544,13 @@ Examples:
     parser.add_argument('--checkpoint', type=str,
                        default='data/processed/kg_checkpoint.json',
                        help='Checkpoint file path')
-    
+    parser.add_argument('--llm-provider', type=str, default=None,
+                       help='LLM provider to use (ollama, openai, claude, gemini, vllm)')
+    parser.add_argument('--llm-base-url', type=str, default=None,
+                       help='Base URL for LLM API (e.g. http://localhost:8080/v1)')
+    parser.add_argument('--llm-model', type=str, default=None,
+                       help='Model name for LLM provider')
+
     args = parser.parse_args()
     
     if not args.test and not args.all and not args.clear:
@@ -508,13 +580,15 @@ Examples:
 
     if args.test:
         # Test mode
-        test_single_pdf(args.test, args.max_pages)
+        test_single_pdf(args.test, args.max_pages, method=args.method,
+                        llm_provider=args.llm_provider, llm_base_url=args.llm_base_url,
+                        llm_model=args.llm_model)
     elif args.all:
         # Find all result files
         result_files = find_all_result_files()
         
         if not result_files:
-            print("ERROR: No result files found in data/processed/*/*/results/")
+            print("ERROR: No result files found in data/processed/*/results/")
             return
         
         print("="*70)
@@ -541,7 +615,11 @@ Examples:
             max_pages=args.max_pages,
             parallel_workers=args.workers,
             checkpoint=checkpoint,
-            resume=args.resume
+            resume=args.resume,
+            method=args.method,
+            llm_provider=args.llm_provider,
+            llm_base_url=args.llm_base_url,
+            llm_model=args.llm_model,
         )
         
         elapsed = time.time() - start_time

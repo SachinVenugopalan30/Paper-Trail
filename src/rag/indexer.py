@@ -85,7 +85,7 @@ class RAGIndexer:
     def discover_result_files(self) -> List[Path]:
         """Glob all *_results.json files under data/processed/."""
         project_root = Path(__file__).parent.parent.parent
-        pattern = "data/processed/*/*/results/*_results.json"
+        pattern = "data/processed/*/results/*_results.json"
         files = sorted(project_root.glob(pattern))
         logger.info(f"Discovered {len(files)} result files")
         return files
