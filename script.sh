@@ -25,7 +25,7 @@ trap 'echo "FAILED at line $LINENO with exit code $?"' ERR
 # ============================
 # USER SETTINGS (override with sbatch --export=ALL,...)
 # ============================
-WORKDIR="/scratch/svenug15/swm-project"
+WORKDIR="/scratch/svenug15/Paper-Trail"
 echo $WORKDIR
 DATA_DIR="${DATA_DIR:-"$WORKDIR/data"}"
 
