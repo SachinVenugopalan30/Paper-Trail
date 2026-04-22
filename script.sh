@@ -1,22 +1,22 @@
 #!/bin/bash
 #SBATCH --job-name=paper_trail
-#SBATCH --partition=htc
+#SBATCH --partition=general
 #SBATCH --account=class_cse573spring2026
 #SBATCH --qos=class
 
 # Resource Allocation
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=16
 #SBATCH --mem=160G
-#SBATCH --time=01:00:00
+#SBATCH --time=3-00:00:00
 
 # Output files
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 
 # Requesting the actual GPU
-#SBATCH --gres=gpu:a30:1
+#SBATCH --gres=gpu:h100:1
 
 set -euo pipefail
 set -x
@@ -43,7 +43,7 @@ CORPUS_DIRS="${CORPUS_DIRS:-
 EXTRACT_METHOD="${EXTRACT_METHOD:-hybrid}"     # native | ocr | hybrid
 PARALLEL_WORKERS="${PARALLEL_WORKERS:-3}"
 MAX_PAGES="${MAX_PAGES:-}"                     # empty = no limit
-PDF_LIMIT="${PDF_LIMIT:-20}"                   # empty = no limit
+PDF_LIMIT="${PDF_LIMIT:-}"                      # empty = no limit
 
 # KG settings
 LLM_PROVIDER="${LLM_PROVIDER:-ollama}"         # ollama | claude | openai | gemini
