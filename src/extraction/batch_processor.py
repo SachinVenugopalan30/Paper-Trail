@@ -5,10 +5,12 @@ Processes multiple PDFs in parallel, extracts both native and OCR text,
 tracks progress, and saves results per file.
 """
 
+import gc
+import itertools
 import json
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -277,6 +279,11 @@ class BatchProcessor:
                     pdf_path, page_idx, pages_to_process
                 )
 
+            # Free large intermediate data structures
+            del native_result
+            del native_pages
+            image_paths = []
+
             # Calculate summary
             total_time = time.time() - start_time
             result["summary"]["native_success_rate"] = (
@@ -295,10 +302,18 @@ class BatchProcessor:
 
             # Mark file as complete
             self.checkpoint.mark_file_complete(pdf_path)
-            result["status"] = "complete"
-            result["result_file"] = str(result_file)
 
-            return result
+            # Free full result dict before returning (data already on disk)
+            lightweight = {
+                "status": "complete",
+                "source_pdf": str(pdf_path),
+                "result_file": str(result_file),
+                "total_pages": result["total_pages"],
+                "summary": result["summary"],
+            }
+            del result
+            gc.collect()
+            return lightweight
 
         except Exception as e:
             self.checkpoint.mark_file_failed(pdf_path, str(e), "unknown")
@@ -342,35 +357,58 @@ class BatchProcessor:
         print()
 
         results = []
+        completed_count = 0
+        max_pending = self.parallel_workers * 2  # Sliding window size
 
-        # Process in parallel with progress bar
+        # Process with sliding window to bound memory usage
         with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
-            # Submit all tasks
-            future_to_pdf = {
-                executor.submit(
-                    self._process_single_pdf, pdf_path, limit_pages_per_pdf
-                ): pdf_path
-                for pdf_path in files_to_process
-            }
-
-            # Process completed tasks with progress bar
             with tqdm(total=len(files_to_process), desc="Processing PDFs") as pbar:
-                for future in as_completed(future_to_pdf):
-                    pdf_path = future_to_pdf[future]
-                    try:
-                        result = future.result()
-                        results.append(result)
+                pending = {}
+                file_iter = iter(files_to_process)
 
-                        # Update progress bar description
-                        status = result.get("status", "unknown")
-                        filename = Path(pdf_path).name
-                        pbar.set_postfix({"last": f"{filename[:20]}... ({status})"})
+                # Seed initial batch
+                for pdf_path in itertools.islice(file_iter, max_pending):
+                    fut = executor.submit(
+                        self._process_single_pdf, pdf_path, limit_pages_per_pdf
+                    )
+                    pending[fut] = pdf_path
 
-                    except Exception as e:
-                        print(f"\nError processing {pdf_path}: {e}")
-                        self.checkpoint.mark_file_failed(pdf_path, str(e), "processing")
+                while pending:
+                    done, _ = wait(pending, return_when=FIRST_COMPLETED)
 
-                    pbar.update(1)
+                    for future in done:
+                        pdf_path = pending.pop(future)
+                        try:
+                            result = future.result()
+                            results.append(result)
+
+                            status = result.get("status", "unknown")
+                            filename = Path(pdf_path).name
+                            pbar.set_postfix(
+                                {"last": f"{filename[:20]}... ({status})"}
+                            )
+                        except Exception as e:
+                            print(f"\nError processing {pdf_path}: {e}")
+                            self.checkpoint.mark_file_failed(
+                                pdf_path, str(e), "processing"
+                            )
+
+                        pbar.update(1)
+                        completed_count += 1
+
+                        # Submit next item to keep window full
+                        next_pdf = next(file_iter, None)
+                        if next_pdf is not None:
+                            fut = executor.submit(
+                                self._process_single_pdf,
+                                next_pdf,
+                                limit_pages_per_pdf,
+                            )
+                            pending[fut] = next_pdf
+
+                    # Periodic garbage collection
+                    if completed_count % 50 == 0:
+                        gc.collect()
 
         # Print summary
         stats = self.checkpoint.get_stats()

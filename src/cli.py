@@ -294,18 +294,23 @@ def kg_extract_command(args):
                 )
                 
                 results = processor.process_batch([str(input_path)])
-                
-                # Combine all page texts
-                if results:
-                    text_parts = []
-                    for page_data in results[0].get('pages', []):
-                        # Use best available text (OCR preferred for accuracy)
-                        if page_data.get('ocr', {}).get('text'):
-                            text_parts.append(page_data['ocr']['text'])
-                        elif page_data.get('native', {}).get('text'):
-                            text_parts.append(page_data['native']['text'])
-                    
-                    text = "\n\n".join(text_parts)
+
+                # Load full result from saved file on disk
+                if results and results[0].get('status') == 'complete':
+                    result_file = results[0].get('result_file')
+                    if result_file:
+                        with open(result_file, 'r', encoding='utf-8') as f:
+                            full_result = json.load(f)
+                        text_parts = []
+                        for page_data in full_result.get('pages', []):
+                            if page_data.get('ocr', {}).get('text'):
+                                text_parts.append(page_data['ocr']['text'])
+                            elif page_data.get('native', {}).get('text'):
+                                text_parts.append(page_data['native']['text'])
+                        text = "\n\n".join(text_parts)
+                    else:
+                        print("Error: Failed to extract text from PDF")
+                        sys.exit(1)
                 else:
                     print("Error: Failed to extract text from PDF")
                     sys.exit(1)

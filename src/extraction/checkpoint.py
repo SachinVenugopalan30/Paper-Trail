@@ -23,24 +23,27 @@ class CheckpointManager:
     - Which files were skipped
     """
     
-    def __init__(self, checkpoint_path: str, project_name: str):
+    def __init__(self, checkpoint_path: str, project_name: str, page_save_interval: int = 5):
         """
         Initialize checkpoint manager.
-        
+
         Args:
             checkpoint_path: Path to checkpoint JSON file
             project_name: Name of the current project/batch
+            page_save_interval: Save checkpoint every N pages (reduces I/O)
         """
         self.checkpoint_path = Path(checkpoint_path)
         self.project_name = project_name
         self.checkpoint_dir = self.checkpoint_path.parent
-        
+        self._page_save_interval = page_save_interval
+        self._unsaved_page_count = 0
+
         # Thread lock for parallel safety
         self._lock = threading.Lock()
-        
+
         # Ensure checkpoint directory exists
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Load or create checkpoint
         self.data = self._load_checkpoint()
     
@@ -139,9 +142,9 @@ class CheckpointManager:
         return 0
     
     def mark_page_processed(self, pdf_path: str, page_num: int, total_pages: int):
-        """Mark a single page as processed."""
+        """Mark a single page as processed. Flushes to disk periodically."""
         filename = Path(pdf_path).name
-        
+
         if filename not in self.data["in_progress_files"]:
             self.data["in_progress_files"][filename] = {
                 "total_pages": total_pages,
@@ -149,11 +152,17 @@ class CheckpointManager:
                 "last_page": 0,
                 "started_at": datetime.now().isoformat()
             }
-        
+
         self.data["in_progress_files"][filename]["pages_done"] += 1
         self.data["in_progress_files"][filename]["last_page"] = page_num
-        
-        self._save_checkpoint()
+
+        self._unsaved_page_count += 1
+
+        # Save periodically or on last page to reduce I/O
+        if (self._unsaved_page_count >= self._page_save_interval
+                or page_num >= total_pages):
+            self._save_checkpoint()
+            self._unsaved_page_count = 0
     
     def mark_file_complete(self, pdf_path: str):
         """Mark entire file as completely processed."""
