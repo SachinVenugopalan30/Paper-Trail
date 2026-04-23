@@ -9,7 +9,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=160G
-#SBATCH --time=3-00:00:00
+#SBATCH --time=08:00:00
 
 # Output files
 #SBATCH --output=%x_%j.out
@@ -150,8 +150,8 @@ trap cleanup EXIT
 # ============================
 # Start Neo4j via Apptainer
 # ============================
-SCRATCH_BASE="${SLURM_TMPDIR:-${SCRATCH:-/scratch/$USER}}"
-NEO4J_SCRATCH="$SCRATCH_BASE/neo4j/$JOB_ID"
+SCRATCH_BASE="${SCRATCH:-/scratch/$USER}"
+NEO4J_SCRATCH="$SCRATCH_BASE/neo4j/persistent"
 mkdir -p "$NEO4J_SCRATCH"/{data,logs,import,plugins}
 
 if ! curl -fsS "http://localhost:${NEO4J_HTTP_PORT}" >/dev/null 2>&1; then

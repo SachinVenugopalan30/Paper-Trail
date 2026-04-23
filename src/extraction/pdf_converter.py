@@ -80,24 +80,25 @@ def convert_pdf_to_images(
     output_files = []
 
     try:
-        convert_kwargs = {
-            "pdf_path": pdf_path,
-            "dpi": dpi,
-            "fmt": "png"
-        }
-        
-        if first_page is not None:
-            convert_kwargs["first_page"] = first_page
-        if last_page is not None:
-            convert_kwargs["last_page"] = last_page
-            
-        images = convert_from_path(**convert_kwargs)
+        # Get page count to iterate one page at a time (avoids OOM)
+        from pdf2image.pdf2image import pdfinfo_from_path
+        info = pdfinfo_from_path(pdf_path)
+        total_pages = int(info.get("Pages", 0))
 
-        for page_num, image in enumerate(images, start=(first_page or 1)):
-            output_filename = f"{pdf_name}_page_{page_num:04d}.png"
-            output_file = output_path / output_filename
-            image.save(str(output_file), "PNG")
-            output_files.append(str(output_file))
+        start_page = first_page or 1
+        end_page = last_page or total_pages
+
+        for page_num in range(start_page, end_page + 1):
+            images = convert_from_path(
+                pdf_path, dpi=dpi, fmt="png",
+                first_page=page_num, last_page=page_num,
+            )
+            if images:
+                output_filename = f"{pdf_name}_page_{page_num:04d}.png"
+                output_file = output_path / output_filename
+                images[0].save(str(output_file), "PNG")
+                output_files.append(str(output_file))
+                del images  # free PIL image memory immediately
 
     except PDFSyntaxError as e:
         raise PDFSyntaxError(f"PDF file is corrupted or invalid: {pdf_path}") from e

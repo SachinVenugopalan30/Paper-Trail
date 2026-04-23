@@ -38,7 +38,7 @@ page_loader:
 
 extraction:
   # PDF to image conversion settings
-  pdf_dpi: 200              # Lower DPI for faster OCR (150-200 recommended)
+  pdf_dpi: 150              # Lower DPI to reduce memory usage (150-200 recommended)
   image_quality: 95
   
   # Hybrid routing settings
