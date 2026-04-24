@@ -234,7 +234,7 @@ if [[ "$EXTRACT_METHOD" != "native" ]] && [[ "$RUN_EXTRACT" == "1" ]]; then
             --env HABANA_VISIBLE_DEVICES="0" \
             --env PYTHONPATH="$PY_OVERLAY:\${PYTHONPATH:-}" \
             "$VLLM_SIF" \
-            bash -c "pip install --target '$PY_OVERLAY' --upgrade transformers && \
+            bash -c "pip install --target '$PY_OVERLAY' 'transformers>=4.45,<5.0' && \
                 PYTHONPATH='$PY_OVERLAY:\${PYTHONPATH:-}' \
                 vllm serve '$GLM_OCR_MODEL' \
                 --device hpu \
