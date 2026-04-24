@@ -221,16 +221,22 @@ if [[ "$EXTRACT_METHOD" != "native" ]] && [[ "$RUN_EXTRACT" == "1" ]]; then
         # Dynamic port based on job ID to avoid collisions
         OCR_PORT=$(( 8080 + (JOB_ID % 10000) ))
 
+        # Install upgraded transformers to scratch (container tmpfs too small)
+        PY_OVERLAY="$TB_SCRATCH/py_overlay"
+        mkdir -p "$PY_OVERLAY"
+
         APPTAINERENV_HABANA_VISIBLE_DEVICES="0" \
         HABANA_VISIBLE_DEVICES="0" \
         apptainer exec \
-            --writable-tmpfs \
             --bind /scratch:/scratch \
             --bind /data:/data \
             --bind "$TB_SCRATCH/habana_logs:/var/log/habana_logs" \
             --env HABANA_VISIBLE_DEVICES="0" \
+            --env PYTHONPATH="$PY_OVERLAY:\${PYTHONPATH:-}" \
             "$VLLM_SIF" \
-            bash -c "pip install --upgrade transformers && vllm serve '$GLM_OCR_MODEL' \
+            bash -c "pip install --target '$PY_OVERLAY' --upgrade transformers && \
+                PYTHONPATH='$PY_OVERLAY:\${PYTHONPATH:-}' \
+                vllm serve '$GLM_OCR_MODEL' \
                 --device hpu \
                 --host 127.0.0.1 \
                 --port $OCR_PORT \
