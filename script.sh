@@ -190,7 +190,6 @@ if [[ "$EXTRACT_METHOD" != "native" ]] && [[ "$RUN_EXTRACT" == "1" ]]; then
         echo "Starting GLM-OCR server ($GLM_OCR_MODEL) via vLLM on CUDA device $GLM_OCR_GPU..."
         mkdir -p "$GLM_OCR_HF_CACHE"
 
-        PYTHONPATH="${PY_PACKAGES}:${PYTHONPATH:-}" \
         HF_HOME="$GLM_OCR_HF_CACHE" \
         CUDA_VISIBLE_DEVICES="$GLM_OCR_GPU" \
         apptainer exec \
