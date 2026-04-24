@@ -224,19 +224,20 @@ if [[ "$EXTRACT_METHOD" != "native" ]] && [[ "$RUN_EXTRACT" == "1" ]]; then
         APPTAINERENV_HABANA_VISIBLE_DEVICES="0" \
         HABANA_VISIBLE_DEVICES="0" \
         apptainer exec \
+            --writable-tmpfs \
             --bind /scratch:/scratch \
             --bind /data:/data \
             --bind "$TB_SCRATCH/habana_logs:/var/log/habana_logs" \
             --env HABANA_VISIBLE_DEVICES="0" \
             "$VLLM_SIF" \
-            vllm serve "$GLM_OCR_MODEL" \
+            bash -c "pip install --upgrade transformers && vllm serve '$GLM_OCR_MODEL' \
                 --device hpu \
                 --host 127.0.0.1 \
-                --port "$OCR_PORT" \
-                --max-model-len "$GLM_OCR_MAX_LEN" \
+                --port $OCR_PORT \
+                --max-model-len $GLM_OCR_MAX_LEN \
                 --block-size 128 \
                 --tensor-parallel-size 1 \
-                --trust-remote-code \
+                --trust-remote-code" \
         > "$LOGDIR/ocr_server.log" 2>&1 &
         OCR_PID=$!
 
