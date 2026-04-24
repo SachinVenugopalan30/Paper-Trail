@@ -31,12 +31,8 @@ DATA_DIR="${DATA_DIR:-"$WORKDIR/data"}"
 
 # All corpus directories to process (space-separated; override to run a subset)
 CORPUS_DIRS="${CORPUS_DIRS:-
-    $DATA_DIR/batch2/GHOSTSCRIPT
-    $DATA_DIR/batch2/TIKA
     $DATA_DIR/batch3/MOZILLA
     $DATA_DIR/batch4/LIBRE_OFFICE
-    $DATA_DIR/batch4/OOO
-    $DATA_DIR/batch4/pdf.js
 }"
 
 # Extraction settings
