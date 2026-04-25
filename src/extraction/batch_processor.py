@@ -372,10 +372,10 @@ class BatchProcessor:
         Returns:
             List of results for each PDF
         """
-        # Filter already processed files
+        # Filter files already in a terminal state (processed, failed, or skipped)
         files_to_process = []
         for pdf_path in pdf_paths[:limit] if limit else pdf_paths:
-            if not self.checkpoint.is_processed(pdf_path):
+            if not self.checkpoint.is_done(pdf_path):
                 files_to_process.append(pdf_path)
 
         if not files_to_process:

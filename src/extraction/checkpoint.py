@@ -127,6 +127,15 @@ class CheckpointManager:
         """Check if a file has been completely processed."""
         filename = Path(pdf_path).name
         return filename in self.data["processed_files"]
+
+    def is_done(self, pdf_path: str) -> bool:
+        """Check if file is in any terminal state (processed, failed, or skipped)."""
+        filename = Path(pdf_path).name
+        return (
+            filename in self.data["processed_files"]
+            or filename in self.data["failed_files"]
+            or filename in self.data["skipped_files"]
+        )
     
     def get_partial_progress(self, pdf_path: str) -> Optional[Dict]:
         """Get progress for partially processed file."""
