@@ -34,6 +34,11 @@ class GLMOCRConnectionError(GLMOCRClientError):
     pass
 
 
+class GLMOCRNonRetryableError(GLMOCRClientError):
+    """Exception raised for 4xx client errors that should not be retried."""
+    pass
+
+
 def _encode_image_to_base64(image_path: str) -> str:
     """
     Encode an image file to base64 string.
@@ -126,9 +131,11 @@ def _make_ocr_request(
             f"Request to GLM-OCR server timed out after {timeout} seconds"
         ) from e
     except requests.exceptions.HTTPError as e:
-        raise GLMOCRServerError(
-            f"GLM-OCR server returned error: {e.response.status_code} - {e.response.text}"
-        ) from e
+        status = e.response.status_code
+        msg = f"GLM-OCR server returned error: {status} - {e.response.text}"
+        if 400 <= status < 500:
+            raise GLMOCRNonRetryableError(msg) from e
+        raise GLMOCRServerError(msg) from e
 
 
 def _extract_text_from_response(response: dict) -> str:
@@ -221,6 +228,10 @@ def extract_ocr(
             )
 
             return text
+
+        except GLMOCRNonRetryableError as e:
+            logger.error(f"OCR request failed (non-retryable): {e}")
+            raise
 
         except (GLMOCRConnectionError, GLMOCRServerError, requests.RequestException) as e:
             last_exception = e

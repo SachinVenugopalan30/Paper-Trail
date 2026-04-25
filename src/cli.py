@@ -844,8 +844,8 @@ Examples:
                              help='Project name for checkpoint tracking')
     batch_parser.add_argument('--save-images', action='store_true', default=True,
                              help='Save converted images (default: True)')
-    batch_parser.add_argument('--ocr-dpi', type=int, default=200,
-                             help='DPI for OCR image conversion (default: 200)')
+    batch_parser.add_argument('--ocr-dpi', type=int, default=150,
+                             help='DPI for OCR image conversion (default: 150)')
     batch_parser.add_argument('--ocr-timeout', type=int, default=300,
                              help='OCR request timeout in seconds (default: 300)')
     batch_parser.set_defaults(func=extract_batch_command)

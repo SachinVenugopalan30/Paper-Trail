@@ -184,6 +184,7 @@ start_vllm_ocr() {
                     --trust-remote-code \
                     --gpu-memory-utilization 0.80 \
                     --max-num-seqs 64 \
+                    --limit-mm-per-prompt image=2 \
             > "$LOGDIR/ocr_server.log" 2>&1 &
             OCR_PID=$!
 
