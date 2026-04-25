@@ -161,34 +161,27 @@ start_neo4j() {
 }
 
 # ============================
-# Start GLM-OCR server via vLLM
+# Start GLM-OCR server via SGLang
 # ============================
 start_vllm_ocr() {
     if [[ "$EXTRACT_METHOD" != "native" ]]; then
         if ! curl -fsS "http://${OCR_HOST}:${OCR_PORT}/v1/models" >/dev/null 2>&1; then
-            echo "Starting GLM-OCR server ($GLM_OCR_MODEL) via vLLM on CUDA device $GLM_OCR_GPU..."
+            echo "Starting GLM-OCR server ($GLM_OCR_MODEL) via SGLang on CUDA device $GLM_OCR_GPU..."
             mkdir -p "$GLM_OCR_HF_CACHE"
 
             HF_HOME="$GLM_OCR_HF_CACHE" \
             CUDA_VISIBLE_DEVICES="$GLM_OCR_GPU" \
-            apptainer exec \
-                --nv \
-                --bind /scratch:/scratch \
-                --env PYTHONPATH="$PY_PACKAGES:${PYTHONPATH:-}" \
-                "$VLLM_SIF" \
-                vllm serve "$GLM_OCR_MODEL" \
-                    --host 127.0.0.1 \
-                    --port "$OCR_PORT" \
-                    --max-model-len "$GLM_OCR_MAX_LEN" \
-                    --tensor-parallel-size 1 \
-                    --trust-remote-code \
-                    --gpu-memory-utilization 0.80 \
-                    --max-num-seqs 64 \
-                    --limit-mm-per-prompt '{"image": 2}' \
+            python3 -m sglang.launch_server \
+                --model-path "$GLM_OCR_MODEL" \
+                --host 127.0.0.1 \
+                --port "$OCR_PORT" \
+                --context-length "$GLM_OCR_MAX_LEN" \
+                --mem-fraction-static 0.85 \
+                --trust-remote-code \
             > "$LOGDIR/ocr_server.log" 2>&1 &
             OCR_PID=$!
 
-            wait_for_http "http://${OCR_HOST}:${OCR_PORT}/v1/models" "GLM-OCR vLLM" 1800
+            wait_for_http "http://${OCR_HOST}:${OCR_PORT}/v1/models" "GLM-OCR SGLang" 1800
             echo "GLM-OCR ready at http://${OCR_HOST}:${OCR_PORT}"
         else
             echo "GLM-OCR server already running."
