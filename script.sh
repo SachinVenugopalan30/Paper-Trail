@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=paper_trail
-#SBATCH --partition=general
+#SBATCH --partition=htc
 #SBATCH --account=class_cse573spring2026
 #SBATCH --qos=class
 
@@ -16,7 +16,7 @@
 #SBATCH --error=%x_%j.err
 
 # Requesting the actual GPU
-#SBATCH --gres=gpu:h100:1
+#SBATCH --gres=gpu:a100:1
 
 set -euo pipefail
 set -x
@@ -31,8 +31,8 @@ DATA_DIR="${DATA_DIR:-"$WORKDIR/data"}"
 
 # All corpus directories to process (space-separated; override to run a subset)
 CORPUS_DIRS="${CORPUS_DIRS:-
-    $DATA_DIR/batch3/MOZILLA
-    $DATA_DIR/batch4/LIBRE_OFFICE
+    $DATA_DIR/batch2/GHOSTSCRIPT
+    $DATA_DIR/batch2/TIKA
 }"
 
 # Extraction settings
@@ -59,7 +59,7 @@ OCR_PORT="${OCR_PORT:-8080}"
 # GLM-OCR via vLLM on NVIDIA GPU
 GLM_OCR_MODEL="${GLM_OCR_MODEL:-zai-org/GLM-OCR}"
 GLM_OCR_HF_CACHE="${GLM_OCR_HF_CACHE:-/scratch/$USER/hf_cache}"
-GLM_OCR_MAX_LEN="${GLM_OCR_MAX_LEN:-8192}"
+GLM_OCR_MAX_LEN="${GLM_OCR_MAX_LEN:-16384}"
 GLM_OCR_GPU="${GLM_OCR_GPU:-0}"
 
 # Python conda env name
@@ -195,6 +195,7 @@ if [[ "$EXTRACT_METHOD" != "native" ]] && [[ "$RUN_EXTRACT" == "1" ]]; then
         apptainer exec \
             --nv \
             --bind /scratch:/scratch \
+            --env PYTHONPATH="$PY_PACKAGES:${PYTHONPATH:-}" \
             "$VLLM_SIF" \
             vllm serve "$GLM_OCR_MODEL" \
                 --host 127.0.0.1 \
