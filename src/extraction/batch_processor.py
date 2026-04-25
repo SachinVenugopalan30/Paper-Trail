@@ -117,6 +117,19 @@ class BatchProcessor:
             if self.checkpoint.is_processed(pdf_path):
                 return {"status": "already_processed", "source_pdf": pdf_path}
 
+            # Skip oversized PDFs to prevent OOM (default 50MB)
+            max_file_size_mb = 50
+            file_size_mb = pdf_file.stat().st_size / (1024 * 1024)
+            if file_size_mb > max_file_size_mb:
+                self.checkpoint.mark_file_skipped(
+                    pdf_path,
+                    f"File too large: {file_size_mb:.0f}MB (>{max_file_size_mb}MB limit)",
+                    {"file_size_mb": round(file_size_mb, 1)},
+                )
+                result["status"] = "skipped"
+                result["summary"]["skip_reason"] = f"File too large: {file_size_mb:.0f}MB"
+                return result
+
             # Get page count
             try:
                 total_pages = get_page_count(pdf_path)
