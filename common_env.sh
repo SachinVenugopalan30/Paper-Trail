@@ -36,7 +36,7 @@ OCR_PORT="${OCR_PORT:-8080}"
 # GLM-OCR via vLLM on NVIDIA GPU
 GLM_OCR_MODEL="${GLM_OCR_MODEL:-zai-org/GLM-OCR}"
 GLM_OCR_HF_CACHE="${GLM_OCR_HF_CACHE:-/scratch/$USER/hf_cache}"
-GLM_OCR_MAX_LEN="${GLM_OCR_MAX_LEN:-16384}"
+GLM_OCR_MAX_LEN="${GLM_OCR_MAX_LEN:-8192}"
 GLM_OCR_GPU="${GLM_OCR_GPU:-0}"
 
 # Python conda env name
@@ -183,6 +183,7 @@ start_vllm_ocr() {
                     --tensor-parallel-size 1 \
                     --trust-remote-code \
                     --gpu-memory-utilization 0.80 \
+                    --max-num-seqs 64 \
             > "$LOGDIR/ocr_server.log" 2>&1 &
             OCR_PID=$!
 
