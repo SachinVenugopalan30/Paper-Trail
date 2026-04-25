@@ -54,8 +54,8 @@ ls -ld "$WORKDIR" || exit 1
 cd "$WORKDIR"
 
 JOB_ID="${SLURM_JOB_ID:-$$}"
-NEO4J_HTTP_PORT="${NEO4J_HTTP_PORT:-$((7474 + SLURM_JOB_ID % 10000))}"
-NEO4J_BOLT_PORT="${NEO4J_BOLT_PORT:-$((7687 + SLURM_JOB_ID % 10000))}"
+NEO4J_HTTP_PORT="${NEO4J_HTTP_PORT:-$((7474 + JOB_ID % 10000))}"
+NEO4J_BOLT_PORT="${NEO4J_BOLT_PORT:-$((7687 + JOB_ID % 10000))}"
 LOGDIR="$WORKDIR/logs/$JOB_ID"
 mkdir -p "$LOGDIR"
 
@@ -64,7 +64,6 @@ echo "Node:         $(hostname)"
 echo "SLURM_JOB_ID: ${SLURM_JOB_ID:-}"
 echo "DATA_DIR:     $DATA_DIR"
 echo "METHOD:       $EXTRACT_METHOD"
-echo "LLM_PROVIDER: $LLM_PROVIDER"
 echo "Stages:       extract=1  kg=0  rag=0 (KG built locally)"
 echo "Corpora:"
 for corpus_dir in $CORPUS_DIRS; do
