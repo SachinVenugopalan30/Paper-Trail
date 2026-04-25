@@ -37,7 +37,7 @@ log_memory() {
     echo "[MEMORY] $(date +%H:%M:%S)  tag=$tag  $(ps -o pid,rss,comm --no-headers --pid $$ | awk '{print "Python_RSS_MB=" $2/1024}')" >> "$LOGDIR/memory.log"
 }
 
-CHUNK_SIZE=200
+CHUNK_SIZE=150
 
 for corpus_dir in $CORPUS_DIRS; do
     [[ -d "$corpus_dir" ]] || { echo "SKIP (not found): $corpus_dir"; continue; }
