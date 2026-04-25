@@ -204,8 +204,6 @@ def process_single_pdf(
         if checkpoint:
             checkpoint.mark_processing(result_file, pages_to_process)
         
-        all_results = []
-
         # Parse document metadata from filename: GHOSTSCRIPT-687111-2_results.json
         stem = result_file.stem  # e.g. GHOSTSCRIPT-687111-2_results
         doc_stem = stem.replace("_results", "")  # e.g. GHOSTSCRIPT-687111-2
@@ -213,7 +211,12 @@ def process_single_pdf(
         source_tracker = parts[0] if parts else ""
         source_bug_id = parts[1] if len(parts) > 1 else ""
 
-        # Process each page
+        importer = BulkImporter(client=kg_client, batch_size=100)
+        total_entities = 0
+        total_relations = 0
+        all_results = []  # kept only for evaluation exports, cleared periodically
+
+        # Process each page — stream imports to Neo4j immediately
         for i, page in enumerate(data.get('pages', [])[:pages_to_process], 1):
             # Get text - prefer OCR if available and longer
             native_text = page.get('native', {}).get('text', '')
@@ -244,6 +247,10 @@ def process_single_pdf(
                         break
                 
                 if result.entities:
+                    # Stream to Neo4j immediately (do not accumulate)
+                    importer.import_extraction_result(result)
+                    total_entities += len(result.entities)
+                    total_relations += len(result.relations)
                     all_results.append(result)
                     
             except Exception as e:
@@ -273,19 +280,10 @@ def process_single_pdf(
                     "extractions": serialized,
                 }, f, indent=2)
 
-        # Import to Neo4j
-        if all_results:
-            importer = BulkImporter(client=kg_client, batch_size=100)
-            for result in all_results:
-                importer.import_extraction_result(result)
-
-            total_entities = sum(len(r.entities) for r in all_results)
-            total_relations = sum(len(r.relations) for r in all_results)
-
-            # Mark as completed
+        # Finalize
+        if total_entities > 0 or total_relations > 0:
             if checkpoint:
                 checkpoint.mark_completed(result_file, total_entities, total_relations)
-
             return total_entities, total_relations, 'completed'
         else:
             # No usable text in any page — mark as skipped so --resume ignores it

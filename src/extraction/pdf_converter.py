@@ -36,13 +36,10 @@ def get_page_count(pdf_path: str) -> int:
         info = pdfinfo_from_path(pdf_path)
         return int(info.get("Pages", 0))
     except Exception as e:
-        # Fallback: try to convert just page 0 to count total
-        try:
-            images = convert_from_path(pdf_path, first_page=1, last_page=1)
-            # Get page count from the first image's info if available
-            return len(convert_from_path(pdf_path, fmt="ppm"))  # ppm is faster
-        except:
-            raise PDFPageCountError(f"Could not determine page count: {e}")
+        # Fallback disabled: rendering all pages to ppm causes OOM on large PDFs.
+        raise PDFPageCountError(
+            f"pdfinfo failed and PPM fallback disabled to prevent OOM: {e}"
+        )
 
 
 def convert_pdf_to_images(

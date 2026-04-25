@@ -23,6 +23,16 @@ from src.extraction.ocr import GLMOCRClientError, extract_ocr
 from src.extraction.pdf_converter import convert_pdf_to_images, get_page_count
 
 
+def _trim_memory():
+    """Aggressively free memory back to the OS (Linux only)."""
+    gc.collect()
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
 class BatchProcessor:
     """
     Process multiple PDFs in batch with parallel workers and checkpoint support.
@@ -74,7 +84,7 @@ class BatchProcessor:
         self, pdf_path: str, limit_pages: Optional[int] = None
     ) -> Dict:
         """
-        Process a single PDF file - extract both native and OCR.
+        Process a single PDF file with true hybrid routing.
 
         Args:
             pdf_path: Path to PDF file
@@ -129,13 +139,40 @@ class BatchProcessor:
                 result["summary"]["skip_reason"] = f"Too many pages: {total_pages}"
                 return result
 
-            # Convert PDF to images (skip for native-only method)
+            # --- Native extraction (skip for ocr-only) ---
+            native_result = None
+            native_pages = []
+            native_time_total = 0.0
+            overall_coverage = 0.0
+
+            if self.method != "ocr":
+                try:
+                    native_start = time.time()
+                    native_result = extract_native(str(pdf_file))
+                    native_pages = native_result.get("pages", [])
+                    native_time_total = (time.time() - native_start) * 1000
+                    overall_coverage = native_result.get("overall_coverage", 0.0)
+                except Exception as e:
+                    self.checkpoint.mark_file_failed(
+                        pdf_path, f"Native extraction failed: {e}", "native"
+                    )
+                    result["summary"]["error"] = f"Native extraction failed: {e}"
+                    return result
+
+            # --- Hybrid routing decision ---
+            # If coverage is high enough, skip images + OCR entirely
+            use_ocr = self.method in ("ocr", "hybrid")
+            skipped_ocr_reason = None
+            if self.method == "hybrid" and overall_coverage >= 0.8:
+                use_ocr = False
+                skipped_ocr_reason = "skipped_due_to_high_native_coverage"
+
+            # --- Convert PDF to images (only if OCR is needed) ---
             image_paths = []
-            if self.method != "native":
+            if use_ocr:
                 pdf_images_dir = (
                     self.images_dir / pdf_name if self.save_images else None
                 )
-
                 if self.save_images and pdf_images_dir:
                     pdf_images_dir.mkdir(parents=True, exist_ok=True)
 
@@ -152,20 +189,7 @@ class BatchProcessor:
                     result["summary"]["error"] = f"Conversion failed: {e}"
                     return result
 
-            # Pre-extract native text ONCE before the page loop
-            try:
-                native_start = time.time()
-                native_result = extract_native(str(pdf_file))
-                native_pages = native_result.get("pages", [])
-                native_time_total = (time.time() - native_start) * 1000
-            except Exception as e:
-                self.checkpoint.mark_file_failed(
-                    pdf_path, f"Native extraction failed: {e}", "native"
-                )
-                result["summary"]["error"] = f"Native extraction failed: {e}"
-                return result
-
-            # Process each page
+            # --- Page loop ---
             native_success = 0
             ocr_success = 0
             total_coverage = 0.0
@@ -175,8 +199,7 @@ class BatchProcessor:
             start_time = time.time()
             last_processed_page = self.checkpoint.get_last_processed_page(pdf_path)
 
-            # For native-only, drive the loop off native_pages; otherwise use image_paths
-            if self.method == "native":
+            if self.method in ("native", "hybrid"):
                 page_count = len(native_pages)
                 pages_to_process = (
                     min(page_count, limit_pages) if limit_pages else page_count
@@ -191,7 +214,6 @@ class BatchProcessor:
                 page_iter = enumerate(image_paths[:pages_to_process], start=1)
 
             for page_idx, image_path in page_iter:
-                # Skip already processed pages
                 if page_idx <= last_processed_page:
                     continue
 
@@ -218,92 +240,91 @@ class BatchProcessor:
                     },
                 }
 
-                # Extract native text - use pre-extracted per-page data
-                try:
-                    if page_idx <= len(native_pages):
-                        page_data = native_pages[page_idx - 1]
-                        page_result["native"]["text"] = page_data.get("text", "")
-                        page_result["native"]["tables"] = page_data.get("tables", [])
-                        page_result["native"]["coverage"] = page_data.get(
-                            "coverage", 0.0
-                        )
-                        page_result["native"]["word_count"] = page_data.get(
-                            "word_count", 0
-                        )
-                        page_result["native"]["char_count"] = page_data.get(
-                            "char_count", 0
-                        )
-                        page_result["native"]["success"] = True
-                        # Distribute total time across pages (approximate)
-                        page_result["native"]["processing_time_ms"] = (
-                            int(native_time_total / len(native_pages))
-                            if native_pages
-                            else 0
-                        )
-
-                        native_success += 1
-                        total_coverage += page_data.get("coverage", 0.0)
-                    else:
-                        page_result["native"]["error"] = (
-                            f"Page {page_idx} not found in native extraction"
-                        )
-                        native_failed_pages.append(page_idx)
-
-                except Exception as e:
-                    page_result["native"]["error"] = str(e)
+                # Native data
+                if native_pages and page_idx <= len(native_pages):
+                    page_data = native_pages[page_idx - 1]
+                    page_result["native"]["text"] = page_data.get("text", "")
+                    page_result["native"]["tables"] = page_data.get("tables", [])
+                    page_result["native"]["coverage"] = page_data.get("coverage", 0.0)
+                    page_result["native"]["word_count"] = page_data.get("word_count", 0)
+                    page_result["native"]["char_count"] = page_data.get("char_count", 0)
+                    page_result["native"]["success"] = True
+                    page_result["native"]["processing_time_ms"] = (
+                        int(native_time_total / len(native_pages)) if native_pages else 0
+                    )
+                    native_success += 1
+                    total_coverage += page_data.get("coverage", 0.0)
+                    # Stream: free consumed page immediately
+                    native_pages[page_idx - 1] = None
+                elif self.method != "ocr":
+                    page_result["native"]["error"] = (
+                        f"Page {page_idx} not found in native extraction"
+                    )
                     native_failed_pages.append(page_idx)
 
-                # Extract OCR text (skip if native-only)
-                if self.method != "native":
-                    try:
-                        ocr_start = time.time()
-                        ocr_text = extract_ocr(
-                            image_path, max_tokens=4096, timeout=self.ocr_timeout
+                # OCR (only when routing says so)
+                if use_ocr:
+                    # For hybrid/native iterator, image_path is None — convert on demand
+                    if image_path is None:
+                        pdf_images_dir = (
+                            self.images_dir / pdf_name if self.save_images else None
                         )
-                        ocr_time = (time.time() - ocr_start) * 1000
+                        if self.save_images and pdf_images_dir:
+                            pdf_images_dir.mkdir(parents=True, exist_ok=True)
+                        try:
+                            page_images = convert_pdf_to_images(
+                                pdf_path=str(pdf_file),
+                                output_dir=str(pdf_images_dir) if pdf_images_dir else "/tmp",
+                                dpi=self.ocr_dpi,
+                                first_page=page_idx,
+                                last_page=page_idx,
+                            )
+                            image_path = page_images[0] if page_images else None
+                        except Exception as e:
+                            page_result["ocr"]["error"] = f"Image conversion failed: {e}"
+                            ocr_failed_pages.append(page_idx)
 
-                        page_result["ocr"]["text"] = ocr_text
-                        page_result["ocr"]["success"] = True
-                        page_result["ocr"]["processing_time_ms"] = int(ocr_time)
-
-                        ocr_success += 1
-
-                    except Exception as e:
-                        page_result["ocr"]["error"] = str(e)
-                        ocr_failed_pages.append(page_idx)
+                    if image_path:
+                        try:
+                            ocr_start = time.time()
+                            ocr_text = extract_ocr(
+                                image_path, max_tokens=4096, timeout=self.ocr_timeout
+                            )
+                            ocr_time = (time.time() - ocr_start) * 1000
+                            page_result["ocr"]["text"] = ocr_text
+                            page_result["ocr"]["success"] = True
+                            page_result["ocr"]["processing_time_ms"] = int(ocr_time)
+                            ocr_success += 1
+                        except Exception as e:
+                            page_result["ocr"]["error"] = str(e)
+                            ocr_failed_pages.append(page_idx)
+                elif skipped_ocr_reason:
+                    page_result["ocr"]["error"] = skipped_ocr_reason
 
                 result["pages"].append(page_result)
+                self.checkpoint.mark_page_processed(pdf_path, page_idx, pages_to_process)
 
-                # Mark this page as processed
-                self.checkpoint.mark_page_processed(
-                    pdf_path, page_idx, pages_to_process
-                )
-
-            # Free large intermediate data structures
+            # Cleanup
             del native_result
             del native_pages
             image_paths = []
 
-            # Calculate summary
+            # Summary
             total_time = time.time() - start_time
-            result["summary"]["native_success_rate"] = (
-                f"{native_success}/{pages_to_process}"
-            )
+            result["summary"]["native_success_rate"] = f"{native_success}/{pages_to_process}"
             result["summary"]["ocr_success_rate"] = f"{ocr_success}/{pages_to_process}"
             result["summary"]["average_native_coverage"] = total_coverage
             result["summary"]["ocr_failed_pages"] = ocr_failed_pages
             result["summary"]["native_failed_pages"] = native_failed_pages
             result["summary"]["total_processing_time_seconds"] = round(total_time, 2)
 
-            # Save results to file
+            # Save results
             result_file = self.results_dir / f"{pdf_name}_results.json"
             with open(result_file, "w", encoding="utf-8") as f:
                 json.dump(result, f, indent=2, ensure_ascii=False)
 
-            # Mark file as complete
             self.checkpoint.mark_file_complete(pdf_path)
 
-            # Free full result dict before returning (data already on disk)
             lightweight = {
                 "status": "complete",
                 "source_pdf": str(pdf_path),
@@ -312,7 +333,7 @@ class BatchProcessor:
                 "summary": result["summary"],
             }
             del result
-            gc.collect()
+            _trim_memory()
             return lightweight
 
         except Exception as e:
@@ -358,7 +379,7 @@ class BatchProcessor:
 
         results = []
         completed_count = 0
-        max_pending = self.parallel_workers * 2  # Sliding window size
+        max_pending = self.parallel_workers + 1  # Tighter sliding window
 
         # Process with sliding window to bound memory usage
         with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
@@ -406,9 +427,8 @@ class BatchProcessor:
                             )
                             pending[fut] = next_pdf
 
-                    # Periodic garbage collection
-                    if completed_count % 50 == 0:
-                        gc.collect()
+                    # Aggressive memory cleanup after every PDF
+                    _trim_memory()
 
         # Print summary
         stats = self.checkpoint.get_stats()

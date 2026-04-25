@@ -33,8 +33,8 @@ class BM25Index:
     # Building
     # ------------------------------------------------------------------
 
-    def add_chunks(self, chunks) -> None:
-        """Add TextChunk objects and build the index."""
+    def add_chunks_no_build(self, chunks) -> None:
+        """Add TextChunk objects without rebuilding the index (for batch streaming)."""
         for c in chunks:
             tokens = _tokenize(c.text)
             self._corpus.append(tokens)
@@ -50,6 +50,14 @@ class BM25Index:
                     },
                 }
             )
+
+    def build(self) -> None:
+        """Rebuild the inverted index after all chunks have been added."""
+        self._build()
+
+    def add_chunks(self, chunks) -> None:
+        """Add TextChunk objects and rebuild the index immediately (convenience)."""
+        self.add_chunks_no_build(chunks)
         self._build()
 
     def _build(self):

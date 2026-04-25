@@ -178,9 +178,9 @@ class RAGIndexer:
             logger.warning("No result files found in data/processed/")
             return {"documents": 0, "pages": 0, "chunks": 0}
 
-        all_chunks: List[TextChunk] = []
         total_pages = 0
         docs_processed = 0
+        total_chunks = 0
 
         for rf in result_files:
             chunks = self.chunk_document(rf)
@@ -192,24 +192,26 @@ class RAGIndexer:
                     total_pages += len(d.get("pages", []))
                 except Exception:
                     pass
-                all_chunks.extend(chunks)
+
+                # Stream to stores immediately (no accumulation)
+                vs.add_chunks(chunks)
+                bm25.add_chunks_no_build(chunks)
+
+                total_chunks += len(chunks)
                 docs_processed += 1
+                del chunks
 
-        logger.info(f"Total chunks to index: {len(all_chunks)}")
+        logger.info(f"Total chunks indexed: {total_chunks}")
 
-        # Populate vector store
-        logger.info("Populating vector store...")
-        vs.add_chunks(all_chunks)
-
-        # Populate BM25
-        logger.info("Building BM25 index...")
-        bm25.add_chunks(all_chunks)
+        # Finalize BM25 index
+        logger.info("Finalizing BM25 index...")
+        bm25.build()
         bm25.save(self.bm25_path)
 
         return {
             "documents": docs_processed,
             "pages": total_pages,
-            "chunks": len(all_chunks),
+            "chunks": total_chunks,
         }
 
     # ------------------------------------------------------------------

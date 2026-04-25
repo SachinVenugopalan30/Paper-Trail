@@ -60,7 +60,7 @@ def _encode_image_to_base64(image_path: str) -> str:
 
 
 def _make_ocr_request(
-    image_b64: str,
+    image_path: str,
     max_tokens: int,
     model: str = "",
     temperature: float = 0.7,
@@ -70,7 +70,7 @@ def _make_ocr_request(
     Make a POST request to the GLM-OCR server.
 
     Args:
-        image_b64: Base64 encoded image string
+        image_path: Path to the image file to encode and send
         max_tokens: Maximum number of tokens to generate
         model: Model identifier to use
         temperature: Sampling temperature
@@ -84,6 +84,9 @@ def _make_ocr_request(
         GLMOCRServerError: If server returns an error response
         requests.RequestException: For other request errors
     """
+    # Encode image inside this call so the base64 string is freed on return
+    image_b64 = _encode_image_to_base64(image_path)
+
     base = os.environ.get("OCR_API_BASE", "http://localhost:8080/v1")
     url = os.environ.get("GLM_OCR_URL", f"{base}/chat/completions")
     model = model or os.environ.get("GLM_OCR_MODEL", "zai-org/GLM-OCR")
@@ -198,9 +201,6 @@ def extract_ocr(
     """
     logger.info(f"Starting OCR extraction for: {image_path}")
 
-    image_b64 = _encode_image_to_base64(image_path)
-    logger.debug(f"Image encoded successfully: {len(image_b64)} characters")
-
     last_exception: Optional[Exception] = None
 
     for attempt in range(max_retries + 1):
@@ -208,7 +208,7 @@ def extract_ocr(
             logger.debug(f"OCR request attempt {attempt + 1}/{max_retries + 1}")
 
             response = _make_ocr_request(
-                image_b64=image_b64,
+                image_path=image_path,
                 max_tokens=max_tokens,
                 timeout=timeout
             )
