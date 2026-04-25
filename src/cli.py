@@ -134,16 +134,12 @@ def extract_batch_command(args):
         print(f"No PDF files found in {input_dir}")
         sys.exit(1)
     
-    # Limit if specified
-    if args.limit:
-        pdf_paths = pdf_paths[:args.limit]
-    
     print(f"Found {len(pdf_paths)} PDF files to process")
     print(f"Max pages per PDF: {args.max_pages}")
     print(f"Parallel workers: {args.parallel}")
     print(f"Save images: {args.save_images}")
     print()
-    
+
     # Initialize batch processor
     processor = BatchProcessor(
         output_dir=args.output_dir,
@@ -156,10 +152,11 @@ def extract_batch_command(args):
         ocr_timeout=args.ocr_timeout,
         method=getattr(args, 'method', 'hybrid')
     )
-    
-    # Process batch
+
+    # Process batch (limit caps how many NEW files per run, after checkpoint filtering)
     results = processor.process_batch(
         pdf_paths=[str(p) for p in pdf_paths],
+        limit=args.limit,
         limit_pages_per_pdf=args.limit_pages
     )
     
