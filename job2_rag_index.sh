@@ -18,7 +18,7 @@
 # No GPU needed for RAG indexing
 
 # Load shared environment
-source "$(dirname "$0")/common_env.sh"
+source "/scratch/$USER/Paper-Trail/common_env.sh"
 
 # ============================
 # Step 3 — Build RAG index

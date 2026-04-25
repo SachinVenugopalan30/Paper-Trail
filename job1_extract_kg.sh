@@ -19,7 +19,7 @@
 #SBATCH --gres=gpu:a100:1
 
 # Load shared environment
-source "$(dirname "$0")/common_env.sh"
+source "/scratch/$USER/Paper-Trail/common_env.sh"
 
 # ============================
 # Start services (OCR only — KG built locally)
