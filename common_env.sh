@@ -185,7 +185,6 @@ start_vllm_ocr() {
                     --gpu-memory-utilization 0.85 \
                     --max-num-seqs 1 \
                     --limit-mm-per-prompt '{"image": 2}' \
-                    --served-model-name glm-ocr \
             > "$LOGDIR/ocr_server.log" 2>&1 &
             OCR_PID=$!
 
