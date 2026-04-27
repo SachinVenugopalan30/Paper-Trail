@@ -30,3 +30,6 @@ CSE573_G30_PDF-OCR_Proposal.md
 logs/
 .env
 backups/
+
+# Presentation figures (generated locally, not versioned)
+presentation/

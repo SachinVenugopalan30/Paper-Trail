@@ -76,11 +76,13 @@ mlx_vlm.server --trust-remote-code   # localhost:8080
 
 Sol is the primary compute environment for large-scale batch processing of the full 22K-document corpus.
 
+> **Reference:** [ASU Research Computing Documentation](https://docs.rc.asu.edu/) — general Sol usage, SLURM, storage, and GPU allocation.
+
 #### 1. Pre-configured Environment
 
 ```bash
 # Log in to Sol
-ssh your-asurite@solsrv.eas.asu.edu
+ssh -X your-asurite@sol.asu.edu
 
 # Load the pre-built conda environment
 module load mamba/latest
@@ -93,62 +95,59 @@ python3 -c "import src; print('OK')"
 
 > **Note:** The Sol environment has all dependencies pre-installed **except** macOS-only packages (`mlx`, `mlx-vlm`). OCR on Sol runs via vLLM + GLM-OCR on GPU, not mlx-vlm.
 
-#### 2. Update `sol_pipeline.sh`
-
-Edit these variables in `sol_pipeline.sh` before running:
+#### 2. Start Services on Sol
 
 ```bash
-WORKDIR="/scratch/your-asurite/paper-trail"   # your scratch directory
-NEO4J_PASSWORD="your-secure-password"
-CONDA_ENV="paper_trail_env"
+# Start Neo4j via Apptainer (once per session)
+apptainer run --rm -p 7474:7474 -p 7687:7687 \
+    -e NEO4J_AUTH=neo4j/password \
+    docker://neo4j:5-community
+
+# Start GLM-OCR via vLLM (GPU node)
+vllm serve zai-org/GLM-OCR --host 127.0.0.1 --port 8080 \
+    --served-model-name glm-ocr --trust-remote-code
 ```
 
-#### 3. Submit the SLURM Job
+#### 3. Run Pipeline Steps Manually
 
 ```bash
-# Copy data to Sol scratch (one-time)
-scp -r data/ your-asurite@solsrv.eas.asu.edu:/scratch/your-asurite/paper-trail/
+# 1) Batch extraction with checkpoint/resume
+python3 -m src.cli extract-batch data/batch3/MOZILLA \
+    --method ocr --parallel 8 \
+    --output-dir data/processed/mozilla \
+    --checkpoint data/processed/mozilla/checkpoint.json
 
-# Submit the full pipeline job
-sbatch sol_pipeline.sh
+# 2) Build knowledge graph
+python3 -m src.cli kg init
+python3 scripts/build_knowledge_graph.py --all --resume
 
-# Monitor job status
-squeue -u your-asurite
+# 3) Build RAG index
+python3 -m src.cli rag index
 
-# Watch live logs
-tail -f paper_trail_full_*.out
+# 4) Export results
+rsync -avz data/processed/ your-laptop:~/paper-trail/data/processed/
 ```
 
-The pipeline (`sol_pipeline.sh`) runs all stages automatically:
-1. **PDF Extraction** — Batch processes all corpora with checkpoint/resume
-2. **Knowledge Graph** — Extracts entities/relations and imports to Neo4j
-3. **RAG Indexing** — Builds ChromaDB + BM25 indexes
-4. **Export** — Packages results for transfer back to your laptop
+#### 4. Resource Guidelines for SLURM Jobs
 
-#### 4. Resource Configuration
+| Resource | Suggested | Purpose |
+|----------|-----------|---------|
+| Partition | `fpga` or `general` | GPU needed only for OCR |
+| CPUs | 8–16 | Parallel extraction workers |
+| Memory | 64–160 GB | Scales with corpus size |
+| GPU | 1 × A30 / A100 | For GLM-OCR vLLM inference |
+| Time | 4–12 hours | Full corpus (~22K PDFs) |
 
-Default resources in `sol_pipeline.sh`:
-
-| Resource | Value | Notes |
-|----------|-------|-------|
-| Partition | `fpga` | GPU-enabled nodes |
-| CPUs | 16 | Parallel extraction workers |
-| Memory | 160 GB | Neo4j + vLLM + batch processing |
-| GPU | 1 × A30 | For GLM-OCR vLLM inference |
-| Time | 12 hours | Full corpus (~22K PDFs) |
-
-Adjust `--time`, `--mem`, and `--gres` for smaller runs:
-
+Submit an interactive job for debugging:
 ```bash
-# Quick test on 100 PDFs
-EXTRACT_METHOD=native PDF_LIMIT=100 sbatch --time=01:00:00 sol_pipeline.sh
+salloc --partition=fpga --gres=gpu:a30:1 --cpus-per-task=8 --mem=64G --time=02:00:00
 ```
 
 #### 5. Transfer Results Back
 
 ```bash
 # From your laptop
-rsync -avz your-asurite@solsrv.eas.asu.edu:/scratch/your-asurite/paper-trail/export/ ./export/
+rsync -avz your-asurite@sol.asu.edu:/scratch/your-asurite/paper-trail/data/processed/ ./data/processed/
 
 # Restore Neo4j dump locally
 docker-compose down
@@ -299,7 +298,6 @@ Evaluation:
 ├── scripts/
 │   ├── build_knowledge_graph.py
 │   └── canonicalize_entities.py
-├── sol_pipeline.sh             # SLURM batch script for ASU Sol
 ├── docker-compose.yml          # Neo4j container
 ├── requirements.txt            # Core dependencies
 ├── requirements-macos.txt      # Apple Silicon (mlx, mlx-vlm)
@@ -337,6 +335,7 @@ curl http://localhost:8080/chat/completions -H "Content-Type: application/json" 
 
 | File | Contains |
 |------|----------|
+| `AGENTS.md` | AI assistant guide: constraints, commands, data layout |
 | `CLAUDE.md` | Architecture overview, data layout, implementation status |
 | `SETUP_NON_MAC.md` | Linux / Windows / Docker / Cloud OCR alternatives |
 | `mlx_vlm_README.md` | GLM-OCR server setup (macOS Apple Silicon) |
