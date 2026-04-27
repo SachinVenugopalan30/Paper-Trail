@@ -8,10 +8,6 @@ data/
 config/llm.yaml
 config/neo4j.yaml
 
-# Generated outputs
-test_results.json
-training_data.json
-
 # macOS
 .DS_Store
 

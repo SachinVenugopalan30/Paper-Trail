@@ -229,14 +229,30 @@ python3 -m src.cli rag index    # Build ChromaDB + BM25
 python3 -m src.cli rag stats    # Verify index
 ```
 
-### Step 4 — Query
+### Step 4 — Launch the Web UI
+
+The Paper Trail chat interface is a Gradio app that combines the hybrid retriever with multi-provider LLM synthesis.
 
 ```bash
-# One-shot CLI query
-python3 -m src.cli rag query "What types of bugs are in the GhostScript corpus?"
+# 1. Activate the Python environment
+cd "/Users/sachin/Desktop/Uni Courses/CSE 573 - SWM/2Project"
+source venv/bin/activate
 
-# Launch Gradio chatbot
-python3 -m src.cli rag chat     # http://localhost:7860
+# 2. Ensure Neo4j is running
+docker-compose up -d neo4j
+
+# 3. Start the Gradio chatbot
+python3 -m src.cli rag chat
+```
+
+Open your browser at **http://127.0.0.1:7860**.
+
+> **Note:** GLM-OCR is only needed when extracting new PDFs; it is **not** required to run the chat UI.
+
+### One-shot CLI Query
+
+```bash
+python3 -m src.cli rag query "memory leak in firefox"
 ```
 
 ---
