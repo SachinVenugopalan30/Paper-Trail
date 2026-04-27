@@ -7,7 +7,14 @@ from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_RAG_CONFIG = str(Path(__file__).parent.parent.parent / "config" / "rag.yaml")
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+_DEFAULT_RAG_CONFIG = str(_PROJECT_ROOT / "config" / "rag.yaml")
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_PROJECT_ROOT / ".env")
+except ImportError:
+    pass
 
 
 def _build_rag_chain(provider: str = "ollama", top_k: int = 8, config_path: Optional[str] = None):
@@ -176,8 +183,8 @@ def create_chatbot_app(config_path: Optional[str] = None):
             with gr.Column(scale=1):
                 with gr.Accordion("Settings", open=False):
                     provider_dd = gr.Dropdown(
-                        choices=["ollama", "claude", "openai", "gemini"],
-                        value="ollama",
+                        choices=["vllm", "ollama", "claude", "openai", "gemini"],
+                        value="vllm",
                         label="LLM Provider",
                     )
                     topk_slider = gr.Slider(

@@ -1,5 +1,1 @@
-"""Web package: Gradio chatbot UI."""
-
-from src.web.chatbot import create_chatbot_app
-
-__all__ = ["create_chatbot_app"]
+"""Web package: Paper Trail FastAPI chat UI."""

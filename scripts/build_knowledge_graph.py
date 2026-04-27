@@ -43,6 +43,13 @@ import time
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+# Load .env so OPENROUTER_API_KEY etc. are available
+try:
+    from dotenv import load_dotenv
+    load_dotenv(project_root / ".env")
+except ImportError:
+    pass
+
 from src.llm import get_client, EntityExtractionChain
 from src.llm.config import get_config, ProviderConfig
 from src.kg import get_client as get_kg_client, BulkImporter
@@ -548,6 +555,10 @@ Examples:
                        help='Base URL for LLM API (e.g. http://localhost:8080/v1)')
     parser.add_argument('--llm-model', type=str, default=None,
                        help='Model name for LLM provider')
+    parser.add_argument('--limit', type=int, default=None,
+                       help='Process only first N result files (for cost testing)')
+    parser.add_argument('--shard', type=str, default=None,
+                       help='Process only files in shard, e.g. 0/2 or 1/2')
 
     args = parser.parse_args()
     
@@ -588,7 +599,24 @@ Examples:
         if not result_files:
             print("ERROR: No result files found in data/processed/*/results/")
             return
-        
+
+        if args.shard:
+            try:
+                idx, total = (int(x) for x in args.shard.split('/'))
+            except ValueError:
+                print(f"ERROR: --shard must be like 0/2 or 1/2, got {args.shard!r}")
+                return
+            if not (0 <= idx < total):
+                print(f"ERROR: shard index {idx} out of range for total {total}")
+                return
+            before = len(result_files)
+            result_files = [f for i, f in enumerate(result_files) if i % total == idx]
+            print(f"--shard {idx}/{total}: {len(result_files)} of {before} files")
+
+        if args.limit:
+            result_files = result_files[:args.limit]
+            print(f"--limit set: processing only first {args.limit} files")
+
         print("="*70)
         print("Knowledge Graph Builder")
         print("="*70)

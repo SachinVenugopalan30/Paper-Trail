@@ -113,8 +113,9 @@ def benchmark_command(args):
     
     # Save results
     if args.output:
+        payload = [r.to_dict() if hasattr(r, 'to_dict') else r for r in results]
         with open(args.output, 'w') as f:
-            json.dump(results, f, indent=2)
+            json.dump(payload, f, indent=2, default=str)
         print(f"\nResults saved to: {args.output}")
 
 
@@ -658,9 +659,9 @@ def rag_query_command(args):
 
 
 def rag_chat_command(args):
-    """Launch the Gradio chatbot UI."""
-    from src.web.chatbot import main as chatbot_main
-    chatbot_main()
+    """Launch the Paper Trail chat web UI."""
+    from src.web.server import main as serve
+    serve(host=args.host, port=args.port, reload=args.reload)
 
 
 def rag_eval_command(args):
@@ -942,7 +943,10 @@ Examples:
     rag_query_parser.set_defaults(func=rag_query_command)
 
     # rag chat
-    rag_chat_parser = rag_subparsers.add_parser('chat', help='Launch Gradio chatbot UI')
+    rag_chat_parser = rag_subparsers.add_parser('chat', help='Launch the Paper Trail chat web UI')
+    rag_chat_parser.add_argument('--host', default='127.0.0.1', help='Bind host (default: 127.0.0.1)')
+    rag_chat_parser.add_argument('--port', type=int, default=7860, help='Bind port (default: 7860)')
+    rag_chat_parser.add_argument('--reload', action='store_true', help='Auto-reload on file changes (dev)')
     rag_chat_parser.set_defaults(func=rag_chat_command)
 
     # rag eval

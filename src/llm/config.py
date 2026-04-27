@@ -25,6 +25,7 @@ class ProviderConfig:
     model: str = "gpt-3.5-turbo"
     max_tokens: int = 4096
     temperature: float = 0.1
+    extra_body: Optional[Dict[str, Any]] = None
     
     def get_api_key(self) -> Optional[str]:
         """Get API key, resolving environment variables if needed."""
@@ -94,6 +95,7 @@ class LLMConfig:
                 model=settings.get("model", "gpt-3.5-turbo"),
                 max_tokens=settings.get("max_tokens", 4096),
                 temperature=settings.get("temperature", 0.1),
+                extra_body=settings.get("extra_body"),
             )
             
         extraction_dict = raw_config.get("extraction", {})

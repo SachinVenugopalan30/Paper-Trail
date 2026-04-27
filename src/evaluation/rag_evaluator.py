@@ -131,6 +131,22 @@ def compute_mrr(retrieved_ids: List[str], relevant_ids: List[str]) -> float:
     return 0.0
 
 
+def compute_recall_at_k_hits(hits: List[bool], k_values: List[int]) -> Dict[int, float]:
+    """Recall@K when ground truth is a single relevant item (binary hit per rank)."""
+    recall = {}
+    for k in k_values:
+        recall[k] = 1.0 if any(hits[:k]) else 0.0
+    return recall
+
+
+def compute_mrr_hits(hits: List[bool]) -> float:
+    """MRR from a per-rank boolean hit list."""
+    for rank, hit in enumerate(hits, start=1):
+        if hit:
+            return 1.0 / rank
+    return 0.0
+
+
 def _extract_doc_id(result) -> str:
     """Extract document_id from a RetrievalResult (metadata or chunk_id prefix)."""
     meta = getattr(result, "metadata", {}) or {}
@@ -225,18 +241,20 @@ def evaluate_retriever(
         latency_ms = (time.perf_counter() - t0) * 1000
 
         retrieved_doc_ids = [_extract_doc_id(r) for r in raw_results]
-
-        # Also match by chunk_id if relevant_chunk_ids provided
         retrieved_chunk_ids = [getattr(r, "chunk_id", "") for r in raw_results]
-        relevant_ids = list(query.relevant_document_ids)
-        if query.relevant_chunk_ids:
-            relevant_ids = list(set(relevant_ids) | set(query.relevant_chunk_ids))
-            retrieved_doc_ids_for_match = list(set(retrieved_doc_ids) | set(retrieved_chunk_ids))
-        else:
-            retrieved_doc_ids_for_match = retrieved_doc_ids
 
-        recall = compute_recall_at_k(retrieved_doc_ids_for_match, relevant_ids, k_values)
-        mrr = compute_mrr(retrieved_doc_ids_for_match, relevant_ids)
+        # Match per rank: a result is a hit if EITHER its doc_id OR chunk_id is in
+        # the relevant set. Doc-level matching automatically gives credit for any
+        # chunk from the source doc — works for both broad (doc-level GT) and
+        # strict (chunk-level GT) eval queries.
+        relevant_set = set(query.relevant_document_ids) | set(query.relevant_chunk_ids)
+        relevant_ids = sorted(relevant_set)
+        hits = [
+            (doc_id in relevant_set) or (chunk_id in relevant_set)
+            for doc_id, chunk_id in zip(retrieved_doc_ids, retrieved_chunk_ids)
+        ]
+        recall = compute_recall_at_k_hits(hits, k_values)
+        mrr = compute_mrr_hits(hits)
 
         source_breakdown: Dict[str, int] = {}
         for r in raw_results:

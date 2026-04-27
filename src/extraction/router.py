@@ -29,7 +29,9 @@ def calculate_native_coverage(native_result: Dict[str, Any]) -> float:
     Returns:
         Text coverage as a float between 0.0 and 1.0
     """
-    return native_result.get("coverage", 0.0)
+    if "overall_coverage" in native_result:
+        return native_result.get("overall_coverage", 0.0) or 0.0
+    return native_result.get("coverage", 0.0) or 0.0
 
 
 def _perform_ocr_extraction(pdf_path: str, max_tokens: int = 4092, dpi: int = 200) -> str:
@@ -310,7 +312,14 @@ def route_extraction(
         native_coverage = calculate_native_coverage(native_result)
         result["native_coverage"] = native_coverage
         result["metadata"]["native_result"] = native_result
-        result["metadata"]["page_count"] = len(native_result.get("tables", []))
+        result["metadata"]["page_count"] = native_result.get(
+            "total_pages", len(native_result.get("pages", []))
+        )
+
+        def _native_text(nr):
+            if nr.get("text"):
+                return nr["text"]
+            return "\n\n".join(p.get("text", "") for p in nr.get("pages", []))
         
         logger.info(
             f"Native extraction completed in {native_time:.2f}s "
@@ -323,7 +332,7 @@ def route_extraction(
                 f"threshold {native_threshold:.2%})"
             )
             result["method"] = "native"
-            result["text"] = native_result.get("text", "")
+            result["text"] = _native_text(native_result)
         else:
             logger.info(
                 f"Native coverage {native_coverage:.2%} below threshold "
@@ -350,7 +359,7 @@ def route_extraction(
                     "Falling back to native extraction."
                 )
                 result["method"] = "native"
-                result["text"] = native_result.get("text", "")
+                result["text"] = _native_text(native_result)
                 result["metadata"]["error"] = f"OCR failed: {ocr_error}"
     
     except Exception as e:

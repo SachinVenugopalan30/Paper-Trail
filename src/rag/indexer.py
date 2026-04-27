@@ -94,10 +94,29 @@ class RAGIndexer:
     # Chunking
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _is_garbage(text: str) -> bool:
+        """Detect glyph-table garbage from pdfplumber misextraction.
+
+        Heuristic: dominated by a single repeated character (e.g. 'G G G ...').
+        """
+        if len(text) < 200:
+            return False
+        from collections import Counter
+        non_ws = [c for c in text if not c.isspace()]
+        if not non_ws:
+            return True
+        top_char, top_count = Counter(non_ws).most_common(1)[0]
+        return top_count / len(non_ws) > 0.4
+
     def _pick_text(self, page: Dict[str, Any]) -> str:
         """Pick the best text for a page based on text_preference."""
         native_text = (page.get("native") or {}).get("text") or ""
         ocr_text = (page.get("ocr") or {}).get("text") or ""
+
+        # Always reject garbage native text in favor of OCR
+        if self._is_garbage(native_text):
+            return ocr_text or ""
 
         if self.text_preference == "native":
             return native_text or ocr_text

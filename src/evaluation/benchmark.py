@@ -174,8 +174,9 @@ class Benchmark:
                     ground_truth_fn=ground_truth_fn
                 )
                 results.append(result)
+                cer_str = f"{result.cer:.3f}" if result.cer is not None else "N/A"
                 logger.info(f"  ✓ {pdf_path}: {result.pages_per_second:.2f} pages/sec, "
-                          f"CER={result.cer:.3f if result.cer is not None else 'N/A'}")
+                          f"CER={cer_str}")
             except Exception as e:
                 logger.error(f"  ✗ {pdf_path}: {str(e)}")
                 error_result = BenchmarkResult(
@@ -329,8 +330,8 @@ class Benchmark:
         data = {'results': [r.to_dict() for r in results]}
         
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        
+            json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+
         logger.info(f"Results saved to {filepath}")
     
     def _save_comparison_report(self, report: ComparisonReport):
@@ -339,8 +340,8 @@ class Benchmark:
         filepath = self.output_dir / filename
         
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(report.to_dict(), f, indent=2, ensure_ascii=False)
-        
+            json.dump(report.to_dict(), f, indent=2, ensure_ascii=False, default=str)
+
         logger.info(f"Comparison report saved to {filepath}")
 
 

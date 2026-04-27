@@ -315,10 +315,18 @@ Extract all entities and relations. Return JSON only."""
             logger.debug(f"Raw content that failed JSON parse (first 500 chars): {content[:500]}")
             # Try to extract JSON from markdown
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-            else:
-                raise
+            candidate = json_match.group() if json_match else content
+            try:
+                data = json.loads(candidate)
+            except json.JSONDecodeError:
+                # Last resort: json-repair fixes trailing commas, missing brackets, truncation
+                try:
+                    from json_repair import repair_json
+                    data = json.loads(repair_json(candidate))
+                except ImportError:
+                    raise
+                except Exception:
+                    raise
         
         # Valid entity types — anything else is rejected
         VALID_TYPES = {"Document", "Person", "Organization", "Technology", "Topic", "Reference", "Location"}

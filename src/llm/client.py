@@ -306,18 +306,71 @@ class VLLMProvider(LLMProvider):
         if ChatOpenAI is None:
             raise ImportError("langchain-openai not installed. Run: pip install langchain-openai")
         self.config = config
-        self.client = ChatOpenAI(
+        client_kwargs = dict(
             base_url=config.base_url or "http://localhost:8000/v1",
             api_key=config.get_api_key() or "not-needed",
             model=config.model,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
         )
+        if config.extra_body:
+            client_kwargs["extra_body"] = config.extra_body
+        self.client = ChatOpenAI(**client_kwargs)
+
+    def _invoke_with_retry(self, messages: List[BaseMessage], **kwargs):
+        """Wrap self.client.invoke() with retry on rate limits and transient errors."""
+        try:
+            from openai import (
+                RateLimitError,
+                APIConnectionError,
+                APITimeoutError,
+                InternalServerError,
+            )
+        except ImportError:
+            return self.client.invoke(messages, **kwargs)
+
+        max_retries = 6
+        base_delay = 2.0
+        max_delay = 90.0
+
+        for attempt in range(max_retries + 1):
+            try:
+                return self.client.invoke(messages, **kwargs)
+            except RateLimitError as e:
+                # Honor Retry-After header if present
+                retry_after = None
+                resp = getattr(e, "response", None)
+                if resp is not None:
+                    hdr = resp.headers.get("retry-after") if hasattr(resp, "headers") else None
+                    if hdr:
+                        try:
+                            retry_after = float(hdr)
+                        except ValueError:
+                            retry_after = None
+                delay = retry_after if retry_after else min(base_delay * (2 ** attempt), max_delay)
+                if attempt >= max_retries:
+                    logger.error(f"Rate limit: giving up after {max_retries + 1} attempts")
+                    raise
+                logger.warning(
+                    f"Rate limited (429). Sleep {delay:.1f}s "
+                    f"(attempt {attempt + 1}/{max_retries + 1})"
+                )
+                time.sleep(delay)
+            except (APIConnectionError, APITimeoutError, InternalServerError) as e:
+                if attempt >= max_retries:
+                    logger.error(f"Transient error: giving up after {max_retries + 1} attempts: {e}")
+                    raise
+                delay = min(base_delay * (2 ** attempt), max_delay)
+                logger.warning(
+                    f"Transient error ({type(e).__name__}): {e}. "
+                    f"Sleep {delay:.1f}s (attempt {attempt + 1}/{max_retries + 1})"
+                )
+                time.sleep(delay)
 
     def chat(self, messages: List[BaseMessage], **kwargs) -> LLMResponse:
         start_time = time.time()
 
-        response = self.client.invoke(messages, **kwargs)
+        response = self._invoke_with_retry(messages, **kwargs)
         content = response.content
 
         usage = TokenUsage()
