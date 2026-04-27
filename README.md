@@ -241,6 +241,26 @@ python3 -m src.cli rag chat     # http://localhost:7860
 
 ---
 
+## Evaluations
+
+Core benchmark results are summarized in [`EVALUATIONS.md`](EVALUATIONS.md). Raw evaluation data lives in [`eval_results/`](eval_results/).
+
+| What | Source File |
+|------|-------------|
+| Extraction CER/WER | `training_data.json` (86 annotated pages) |
+| RAG Recall@K / MRR / Latency | `eval_results/rag_retrieval_tiers_synthetic_v2.json` |
+
+Run evaluations locally:
+```bash
+# E1-E3 extraction ablation
+python3 -m src.cli benchmark data/batch3/MOZILLA --ablation E3
+
+# RAG tier ablation (E7-E10)
+python3 -m src.cli rag eval --tiers --output eval_results/rag_ablation.json
+```
+
+---
+
 ## CLI Reference
 
 ```
