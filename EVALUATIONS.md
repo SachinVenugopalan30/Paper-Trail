@@ -6,7 +6,7 @@ Summary of the core benchmark and evaluation results for Paper Trail. Raw data l
 
 ## 1. Corpus Composition
 
-**Source:** `data/batch*/` directories (22,930 PDFs total)
+**Source:** `data/batch*/` directories (21,930 PDFs total)
 
 | Source | Count | Share |
 |--------|------:|------:|
